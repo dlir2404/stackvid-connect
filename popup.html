@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>StackVid Connect</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <svg class="brand-logo" viewBox="0 0 24 24" fill="none">
+          <path d="M4 1.5h7a2.5 2.5 0 0 1 2.5 2.5V5h-2V4a.5.5 0 0 0-.5-.5H4a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5h1v2H4A2.5 2.5 0 0 1 1.5 11V4A2.5 2.5 0 0 1 4 1.5zm4 4h8a2.5 2.5 0 0 1 2.5 2.5V9h-2V8a.5.5 0 0 0-.5-.5H8a.5.5 0 0 0-.5.5v8a.5.5 0 0 0 .5.5h1v2H8A2.5 2.5 0 0 1 5.5 16V8A2.5 2.5 0 0 1 8 5.5zm4 4h8a2.5 2.5 0 0 1 2.5 2.5v8a2.5 2.5 0 0 1-2.5 2.5h-8a2.5 2.5 0 0 1-2.5-2.5v-8a2.5 2.5 0 0 1 2.5-2.5zm1.5 3v7l6-3.5-6-3.5z" fill="#06B6D4"/>
+        </svg>
+        <span class="brand-name">STACKVID</span>
+        <span class="brand-tag">CONNECT</span>
+      </div>
+      <span class="version-badge">v1.0.0</span>
+    </header>
+
+    <!-- Main Card -->
+    <main class="content">
+      <!-- Target Status Banner -->
+      <div class="status-card">
+        <div class="status-row">
+          <span class="target-domain" id="target-domain">tiktok.com</span>
+          <div class="status-badge" id="status-badge">
+            <span class="dot dot-waiting" id="status-dot"></span>
+            <span class="status-text" id="status-text">ĐANG CHỜ</span>
+          </div>
+        </div>
+        <p class="status-tip" id="status-tip">
+          Mở tab TikTok và lướt vài video hoặc vào hồ sơ Creator để bắt session.
+        </p>
+      </div>
+
+      <!-- Live Metadata Grid -->
+      <div class="metrics-grid">
+        <div class="metric-item">
+          <span class="metric-label">Account (odinId)</span>
+          <span class="metric-value" id="val-odin">—</span>
+        </div>
+        <div class="metric-item">
+          <span class="metric-label">Cookies</span>
+          <span class="metric-value" id="val-cookies">0</span>
+        </div>
+        <div class="metric-item">
+          <span class="metric-label">msToken</span>
+          <span class="metric-value" id="val-mstoken">—</span>
+        </div>
+        <div class="metric-item">
+          <span class="metric-label">Last Detected</span>
+          <span class="metric-value" id="val-time">—</span>
+        </div>
+      </div>
+
+      <!-- Primary Action Buttons -->
+      <div class="actions-group">
+        <button class="btn btn-primary" id="btn-copy-json">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+          <span id="btn-copy-json-text">COPY SESSION JSON</span>
+        </button>
+
+        <button class="btn btn-secondary" id="btn-copy-cookies">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5"></path>
+            <path d="M8.5 8.5v.01"></path>
+            <path d="M16 15.5v.01"></path>
+            <path d="M12 12v.01"></path>
+          </svg>
+          <span id="btn-copy-cookies-text">COPY RAW COOKIES</span>
+        </button>
+      </div>
+
+      <!-- Direct Channel Connection Section -->
+      <div class="gateway-sync-card">
+        <div class="gateway-header">
+          <span class="gateway-title">TỰ ĐỘNG THÊM KÊNH VÀO TÀI KHOẢN</span>
+          <button type="button" class="btn-toggle-config" id="btn-toggle-config" title="Cài đặt Endpoint URL">⚙</button>
+        </div>
+        <p class="gateway-tip">Dán API Key để tự động thêm kênh TikTok này vào tài khoản StackVid của bạn.</p>
+        <div class="input-group">
+          <div class="config-row" id="config-row" style="display: none;">
+            <input type="text" id="input-gateway" placeholder="https://api.stackvid.dev" class="input-text" spellcheck="false"/>
+          </div>
+          <div class="key-input-wrapper">
+            <input type="password" id="input-apikey" placeholder="Dán API Key (tk_live_...)" class="input-text" spellcheck="false"/>
+            <button type="button" class="btn-eye" id="btn-toggle-key" title="Hiện/ẩn API Key">👁</button>
+          </div>
+          <button class="btn btn-connect" id="btn-sync-gateway">
+            <span id="btn-sync-text">⚡ THÊM KÊNH VÀO TÀI KHOẢN</span>
+          </button>
+        </div>
+        <div class="sync-status" id="sync-status"></div>
+      </div>
+
+      <!-- Warning Callout -->
+      <div class="warning-callout">
+        <span class="warning-icon">⚠️</span>
+        <div class="warning-content">
+          <span class="warning-title">Lưu ý giữ phiên:</span>
+          <span class="warning-desc">Tuyệt đối <strong>không bấm Đăng xuất</strong> trên web TikTok sau khi kết nối (sẽ làm chết session). Để quản lý nhiều tài khoản, hãy dùng <strong>Profile Chrome riêng</strong> hoặc Tab ẩn danh.</span>
+        </div>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <button class="btn-link" id="btn-reset">⟳ Xóa cache</button>
+      <a href="https://stackvid.dev/dashboard/channels" target="_blank" class="btn-link">Mở Dashboard ↗</a>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
