@@ -77,15 +77,30 @@ async function processRequestHeaders(details) {
   if (domain.includes('tiktok.com') || domain.includes('byteoversea.com') || domain.includes('ibytedtos.com')) {
     targetDomain = 'tiktok.com';
 
-    // Look for essential identifiers: odinId OR (msToken AND device_id) OR sessionid cookie
-    const hasOdin = parsedParams.odinId || cookieHeader.includes('odinId') || cookieHeader.includes('odin_tt');
+    /*
+      This gate believed it required an odinId. It did not.
+
+      `cookieHeader.includes('odin_tt')` is true for essentially every TikTok request -- odin_tt
+      is a hex device token present on anonymous traffic too -- so `hasOdin` was satisfied
+      without the session carrying any user id at all. Sessions were then saved whose
+      `http.params` held only signing junk, and on the server the upload path, which looked up
+      `http.params.odinId` and nothing else, refused to publish with them. Three of nine
+      channels in production were in exactly that state: able to scan, read profiles and search
+      music, unable to post.
+
+      The user id is now resolved properly, from multi_sids when params lack it.
+    */
+    const resolvedUserId = resolveTikTokUserId(parsedParams, parsedCookies, cookieHeader);
     const hasSessionId = parsedCookies.sessionid || cookieHeader.includes('sessionid=');
     const hasMsToken = parsedParams.msToken || parsedCookies.msToken || cookieHeader.includes('msToken');
     const hasDeviceId = parsedParams.device_id || parsedCookies.device_id;
 
     // Must be an API request or have strong credential markers
-    if ((hasOdin && (hasMsToken || hasDeviceId)) || (hasSessionId && hasOdin)) {
+    if (resolvedUserId && ((hasMsToken || hasDeviceId) || hasSessionId)) {
       isMatch = true;
+      // Written into params so the saved session always carries it, wherever it was found.
+      // The server resolves it too, but a session that leaves here complete needs no rescue.
+      if (!parsedParams.odinId) parsedParams.odinId = resolvedUserId;
     }
   }
 
@@ -205,11 +220,85 @@ function formatForExport(sessionData) {
 }
 
 /**
+ * Inspect Google Flow / Labs session using chrome.cookies API
+ */
+async function handleGetGoogleSession() {
+  if (!chrome.cookies) return null;
+
+  try {
+    const [googleCookies, flowCookies, labsCookies, accountsCookies] = await Promise.all([
+      chrome.cookies.getAll({ domain: '.google.com' }).catch(() => []),
+      chrome.cookies.getAll({ domain: 'flow.google.com' }).catch(() => []),
+      chrome.cookies.getAll({ domain: 'labs.google' }).catch(() => []),
+      chrome.cookies.getAll({ domain: 'accounts.google.com' }).catch(() => []),
+    ]);
+
+    const cookieMap = {};
+    for (const c of [...googleCookies, ...flowCookies, ...labsCookies, ...accountsCookies]) {
+      if (c && c.name && c.value) {
+        cookieMap[c.name] = c.value;
+      }
+    }
+
+    // Check if user has core auth cookies
+    const hasAuth = Boolean(
+      cookieMap['SID'] ||
+      cookieMap['__Secure-1PSID'] ||
+      cookieMap['SAPISID'] ||
+      cookieMap['HSID']
+    );
+
+    if (!hasAuth) {
+      return null;
+    }
+
+    const rawCookieString = Object.entries(cookieMap)
+      .map(([k, v]) => `${k}=${v}`)
+      .join('; ');
+
+    return {
+      http: {
+        type: 'fetch',
+        url: 'https://flow.google.com/',
+        method: 'GET',
+        timestamp: new Date().toISOString(),
+        headers: {
+          Cookie: rawCookieString,
+          cookie: rawCookieString,
+        },
+        params: {
+          odinId: 'Google Flow Account',
+          hasTs: Boolean(cookieMap['__Secure-1PSIDTS']),
+          has1PSID: Boolean(cookieMap['__Secure-1PSID']),
+        },
+        cookies: cookieMap,
+      },
+      meta: {
+        platform: 'GOOGLE_FLOW',
+        domain: 'flow.google.com',
+        totalCookies: Object.keys(cookieMap).length,
+        hasTimestampedSession: Boolean(cookieMap['__Secure-1PSIDTS']),
+      },
+    };
+  } catch (err) {
+    console.error('Failed to get Google cookies:', err);
+    return null;
+  }
+}
+
+/**
  * Message Dispatcher
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'GET_SESSION') {
     const domain = message.domain || 'tiktok.com';
+    if (domain.includes('google.com') || domain.includes('flow.google.com') || domain.includes('labs.google')) {
+      handleGetGoogleSession()
+        .then((session) => sendResponse({ success: true, session, domain }))
+        .catch((err) => sendResponse({ success: false, error: err.message, domain }));
+      return true;
+    }
+
     const raw = sessionsMemoryCache[domain];
     const formatted = formatForExport(raw);
     sendResponse({ success: true, session: formatted, domain });
@@ -367,6 +456,47 @@ function parseUrlParams(urlString) {
   } catch {
     return {};
   }
+}
+
+/**
+ * The numeric TikTok user id this session belongs to, or null.
+ *
+ * `odinId` only appears on the query string of some TikTok endpoints, so whether it is captured
+ * is down to which request the user's browsing happened to produce. `multi_sids` is in the
+ * cookie of every logged-in session and holds `<uid>:<sessionid>`, so it is the reliable
+ * source. Checked against production: on four channels that did capture an odinId, the leading
+ * digits of multi_sids matched it exactly, four times out of four.
+ *
+ * `odin_tt` is NOT this. It is a hex device token, and reading it as proof of an odinId is
+ * exactly what let sessions through without one -- see the capture gate below.
+ */
+function resolveTikTokUserId(params, cookies, cookieHeader) {
+  const ok = (v) => (v !== undefined && v !== null && /^\d{10,24}$/.test(String(v).trim()) ? String(v).trim() : null);
+
+  const direct = ok(params.odinId) || ok(params.user_id);
+  if (direct) return direct;
+
+  let encoded = cookies.multi_sids;
+  if (!encoded) {
+    const m = cookieHeader.match(/multi_sids=([^;]+)/);
+    encoded = m ? m[1] : '';
+  }
+  if (encoded) {
+    let value = encoded;
+    try { value = decodeURIComponent(encoded); } catch (e) { /* use it raw */ }
+    const entries = value.split(',').filter(Boolean);
+    if (entries.length) {
+      // When a browser holds several TikTok logins, the entry whose session id matches the one
+      // in use names the right account. Publishing to the wrong channel would look like success.
+      let sidTt = cookies.sid_tt || (cookieHeader.match(/sid_tt=([^;]+)/) || [])[1] || '';
+      try { sidTt = decodeURIComponent(sidTt); } catch (e) { /* use it raw */ }
+      const chosen = (sidTt && entries.find((e) => e.includes(sidTt))) || entries[0];
+      const uid = ok((chosen.match(/^(\d{10,24})/) || [])[1]);
+      if (uid) return uid;
+    }
+  }
+
+  return ok(cookies.odin_id) || ok((cookieHeader.match(/odin_id=([0-9]{10,24})/) || [])[1]);
 }
 
 function parseCookieString(cookieString) {
